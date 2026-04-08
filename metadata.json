@@ -1,0 +1,7 @@
+{
+  "name": "Gemini Voice Companion",
+  "description": "A voice companion tool to speak to Gemini 3.1 using the Live API.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

@@ -41,13 +41,21 @@ export default function App() {
       setStatusMessage('Venter på mikrofon...');
 
       // 2. Get Microphone Stream with better constraints for headsets
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        } 
-      });
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          } 
+        });
+      } catch (mediaErr: any) {
+        console.warn('Kunne ikke hente mikrofon med specifikke indstillinger, prøver standard...', mediaErr);
+        // Fallback to basic audio request if constraints fail
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+      
       streamRef.current = stream;
 
       setStatusMessage('Forbinder til AI...');

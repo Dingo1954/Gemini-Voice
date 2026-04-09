@@ -16,6 +16,7 @@ export default function App() {
   const [volume, setVolume] = useState(0);
   const [statusMessage, setStatusMessage] = useState('Tryk for at starte');
   const [selectedVoice, setSelectedVoice] = useState('Zephyr');
+  const [outputVolume, setOutputVolume] = useState(1);
 
   const voices = [
     { id: 'Zephyr', name: 'Zephyr (Dyb/Rolig)' },
@@ -196,7 +197,12 @@ export default function App() {
 
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(audioCtx.destination);
+    
+    const gainNode = audioCtx.createGain();
+    gainNode.gain.value = outputVolume;
+    
+    source.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
 
     if (nextPlayTimeRef.current < audioCtx.currentTime) {
       nextPlayTimeRef.current = audioCtx.currentTime;
@@ -227,6 +233,7 @@ export default function App() {
   const stopSession = () => {
     setIsRecording(false);
     setIsConnecting(false);
+    setStatusMessage('Tryk for at starte');
     
     if (processorRef.current) {
       processorRef.current.disconnect();
@@ -307,11 +314,18 @@ export default function App() {
               <Loader2 className="w-10 h-10 animate-spin" />
             ) : isRecording ? (
               <div className="flex flex-col items-center">
-                <Mic className="w-10 h-10 mb-1" />
-                <div className="flex gap-1 items-end h-3">
-                  <motion.div animate={{ height: Math.max(4, volume * 24) }} className="w-1 bg-orange-400 rounded-full" />
-                  <motion.div animate={{ height: Math.max(4, volume * 32) }} className="w-1 bg-orange-400 rounded-full" />
-                  <motion.div animate={{ height: Math.max(4, volume * 24) }} className="w-1 bg-orange-400 rounded-full" />
+                <motion.div
+                  animate={{ 
+                    color: volume > 0.1 ? '#fb923c' : '#fdba74',
+                    scale: 1 + volume * 0.2
+                  }}
+                >
+                  <Mic className="w-10 h-10 mb-1" />
+                </motion.div>
+                <div className="flex gap-1 items-end h-4">
+                  <motion.div animate={{ height: Math.max(4, volume * 30) }} className="w-1.5 bg-orange-400 rounded-full" />
+                  <motion.div animate={{ height: Math.max(4, volume * 45) }} className="w-1.5 bg-orange-400 rounded-full" />
+                  <motion.div animate={{ height: Math.max(4, volume * 30) }} className="w-1.5 bg-orange-400 rounded-full" />
                 </div>
               </div>
             ) : (
@@ -326,28 +340,59 @@ export default function App() {
               {error}
             </p>
           ) : (
-            <p className={`text-sm tracking-widest uppercase ${isRecording ? 'text-orange-400/80 animate-pulse' : 'text-white/50'}`}>
-              {statusMessage}
-            </p>
+            <div className="flex items-center gap-3">
+              {isRecording && (
+                <motion.div 
+                  animate={{ opacity: [1, 0.5, 1] }}
+                  transition={{ duration: 1.5, repeat: Infinity }}
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20"
+                >
+                  <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
+                  <span className="text-[10px] font-bold text-red-500 tracking-widest">REC</span>
+                </motion.div>
+              )}
+              <p className={`text-sm tracking-widest uppercase ${isRecording ? 'text-orange-400/80' : 'text-white/50'}`}>
+                {isConnecting ? statusMessage : isRecording ? 'Lytter...' : 'Tryk for at starte'}
+              </p>
+            </div>
           )}
         </div>
 
         {/* Voice Selection */}
         {!isRecording && !isConnecting && (
-          <div className="flex flex-wrap justify-center gap-2 max-w-md px-4">
-            {voices.map((voice) => (
-              <button
-                key={voice.id}
-                onClick={() => setSelectedVoice(voice.id)}
-                className={`px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 ${
-                  selectedVoice === voice.id
-                    ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]'
-                    : 'bg-white/5 text-white/40 hover:bg-white/10'
-                }`}
-              >
-                {voice.name}
-              </button>
-            ))}
+          <div className="flex flex-col items-center space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {/* Volume Control */}
+            <div className="flex items-center gap-4 bg-white/5 px-6 py-3 rounded-2xl backdrop-blur-sm border border-white/10 w-full max-w-xs">
+              <Volume2 className="w-5 h-5 text-white/40" />
+              <input
+                type="range"
+                min="0"
+                max="1.5"
+                step="0.01"
+                value={outputVolume}
+                onChange={(e) => setOutputVolume(parseFloat(e.target.value))}
+                className="flex-1 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-orange-500"
+              />
+              <span className="text-[10px] font-mono text-white/40 w-8 text-right">
+                {Math.round(outputVolume * 100)}%
+              </span>
+            </div>
+
+            <div className="flex flex-wrap justify-center gap-2 max-w-md px-4">
+              {voices.map((voice) => (
+                <button
+                  key={voice.id}
+                  onClick={() => setSelectedVoice(voice.id)}
+                  className={`px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 ${
+                    selectedVoice === voice.id
+                      ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]'
+                      : 'bg-white/5 text-white/40 hover:bg-white/10'
+                  }`}
+                >
+                  {voice.name}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

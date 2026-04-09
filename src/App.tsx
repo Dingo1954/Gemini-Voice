@@ -15,8 +15,22 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [volume, setVolume] = useState(0);
   const [statusMessage, setStatusMessage] = useState('Tryk for at starte');
-  const [selectedVoice, setSelectedVoice] = useState('Zephyr');
-  const [outputVolume, setOutputVolume] = useState(1);
+  const [selectedVoice, setSelectedVoice] = useState(() => {
+    return localStorage.getItem('gemini_voice') || 'Zephyr';
+  });
+  const [outputVolume, setOutputVolume] = useState(() => {
+    const saved = localStorage.getItem('gemini_volume');
+    return saved !== null ? parseFloat(saved) : 1;
+  });
+
+  // Persist settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('gemini_voice', selectedVoice);
+  }, [selectedVoice]);
+
+  useEffect(() => {
+    localStorage.setItem('gemini_volume', outputVolume.toString());
+  }, [outputVolume]);
 
   const voices = [
     { id: 'Zephyr', name: 'Zephyr (Dyb/Rolig)' },

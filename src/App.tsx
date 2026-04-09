@@ -15,6 +15,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [volume, setVolume] = useState(0);
   const [statusMessage, setStatusMessage] = useState('Tryk for at starte');
+  const [selectedVoice, setSelectedVoice] = useState('Zephyr');
+
+  const voices = [
+    { id: 'Zephyr', name: 'Zephyr (Dyb/Rolig)' },
+    { id: 'Puck', name: 'Puck (Lys/Energisk)' },
+    { id: 'Charon', name: 'Charon (Blød)' },
+    { id: 'Kore', name: 'Kore (Klar)' },
+    { id: 'Fenrir', name: 'Fenrir (Stærk)' },
+  ];
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -66,7 +75,7 @@ export default function App() {
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoice } },
           },
           systemInstruction: 'You are a helpful, friendly voice companion. Keep your answers concise and conversational. You are talking to a Danish user, so please speak Danish.',
         },
@@ -322,6 +331,25 @@ export default function App() {
             </p>
           )}
         </div>
+
+        {/* Voice Selection */}
+        {!isRecording && !isConnecting && (
+          <div className="flex flex-wrap justify-center gap-2 max-w-md px-4">
+            {voices.map((voice) => (
+              <button
+                key={voice.id}
+                onClick={() => setSelectedVoice(voice.id)}
+                className={`px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 ${
+                  selectedVoice === voice.id
+                    ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]'
+                    : 'bg-white/5 text-white/40 hover:bg-white/10'
+                }`}
+              >
+                {voice.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

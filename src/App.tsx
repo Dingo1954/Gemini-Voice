@@ -22,6 +22,13 @@ export default function App() {
     const saved = localStorage.getItem('gemini_volume');
     return saved !== null ? parseFloat(saved) : 1;
   });
+  const [chatHistory, setChatHistory] = useState<{role: string, text: string, id: number}[]>([]);
+  const [selectedPersonaId, setSelectedPersonaId] = useState(() => {
+    return localStorage.getItem('gemini_persona') || 'venlig';
+  });
+  const [customPersona, setCustomPersona] = useState(() => {
+    return localStorage.getItem('gemini_custom_persona') || '';
+  });
 
   // Persist settings to localStorage
   useEffect(() => {
@@ -32,6 +39,14 @@ export default function App() {
     localStorage.setItem('gemini_volume', outputVolume.toString());
   }, [outputVolume]);
 
+  useEffect(() => {
+    localStorage.setItem('gemini_persona', selectedPersonaId);
+  }, [selectedPersonaId]);
+
+  useEffect(() => {
+    localStorage.setItem('gemini_custom_persona', customPersona);
+  }, [customPersona]);
+
   const voices = [
     { id: 'Zephyr', name: 'Zephyr (Dyb/Rolig)' },
     { id: 'Puck', name: 'Puck (Lys/Energisk)' },
@@ -39,6 +54,21 @@ export default function App() {
     { id: 'Kore', name: 'Kore (Klar)' },
     { id: 'Fenrir', name: 'Fenrir (Stærk)' },
   ];
+
+  const personas = [
+    { id: 'venlig', name: 'Venlig Følgesvend', instruction: 'You are a helpful, friendly voice companion. Keep your answers concise and conversational. You are talking to a Danish user, so please speak Danish.' },
+    { id: 'interviewer', name: 'Job-interviewer', instruction: 'You are a strict but fair job interviewer conducting a job interview in Danish. Ask challenging questions and evaluate the user\'s responses. Be concise.' },
+    { id: 'underviser', name: 'Sprogunderviser', instruction: 'You are a helpful Danish language teacher. Gently correct grammar mistakes, explain vocabulary, and encourage the user to practice speaking Danish.' },
+    { id: 'custom', name: 'Brugerdefineret', instruction: '' }
+  ];
+
+  const getSystemInstruction = () => {
+    if (selectedPersonaId === 'custom') {
+      return customPersona || personas[0].instruction;
+    }
+    const persona = personas.find(p => p.id === selectedPersonaId);
+    return persona ? persona.instruction : personas[0].instruction;
+  };
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -47,12 +77,17 @@ export default function App() {
   const sessionRef = useRef<any>(null);
   const nextPlayTimeRef = useRef<number>(0);
   const sourceNodesRef = useRef<AudioBufferSourceNode[]>([]);
+  const speechRecognitionRef = useRef<any>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number>(null);
 
   const startSession = async () => {
     try {
       setError(null);
       setIsConnecting(true);
       setVolume(0);
+      setChatHistory([]);
       
       setStatusMessage('Starter lydsystem...');
 
@@ -88,17 +123,44 @@ export default function App() {
       const sessionPromise = ai.live.connect({
         model: 'gemini-3.1-flash-live-preview',
         config: {
-          responseModalities: [Modality.AUDIO],
+          responseModalities: [Modality.AUDIO, Modality.TEXT],
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoice } },
           },
-          systemInstruction: 'You are a helpful, friendly voice companion. Keep your answers concise and conversational. You are talking to a Danish user, so please speak Danish.',
+          systemInstruction: getSystemInstruction(),
         },
         callbacks: {
           onopen: () => {
             setIsConnecting(false);
             setIsRecording(true);
             setStatusMessage('Lytter...');
+
+            // Set up Speech Recognition for User Subtitles
+            const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+            if (SpeechRecognition) {
+              const recognition = new SpeechRecognition();
+              recognition.lang = 'da-DK';
+              recognition.continuous = true;
+              recognition.interimResults = false;
+
+              recognition.onresult = (event: any) => {
+                const last = event.results.length - 1;
+                const text = event.results[last][0].transcript;
+
+                setChatHistory(prev => [...prev, {
+                  role: 'Bruger',
+                  text: text,
+                  id: Date.now()
+                }]);
+              };
+
+              try {
+                recognition.start();
+                speechRecognitionRef.current = recognition;
+              } catch (e) {
+                console.warn('Speech recognition failed to start:', e);
+              }
+            }
 
             // Start streaming audio from microphone
             const source = audioCtx.createMediaStreamSource(stream);
@@ -110,9 +172,48 @@ export default function App() {
             dummyGain.gain.value = 0;
             dummyGainRef.current = dummyGain;
             
+            // Set up Analyser for visualizer
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+            analyserRef.current = analyser;
+
             source.connect(processor);
             processor.connect(dummyGain);
             dummyGain.connect(audioCtx.destination);
+
+            // Connect to visualizer
+            source.connect(analyser);
+
+            // Start Visualizer Loop
+            const drawVisualizer = () => {
+              if (!canvasRef.current || !analyserRef.current) return;
+
+              const canvas = canvasRef.current;
+              const canvasCtx = canvas.getContext('2d');
+              if (!canvasCtx) return;
+
+              const bufferLength = analyser.frequencyBinCount;
+              const dataArray = new Uint8Array(bufferLength);
+              analyser.getByteFrequencyData(dataArray);
+
+              canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+              const barWidth = (canvas.width / bufferLength) * 2.5;
+              let barHeight;
+              let x = 0;
+
+              for (let i = 0; i < bufferLength; i++) {
+                barHeight = dataArray[i] / 2;
+
+                // Colors based on intensity
+                canvasCtx.fillStyle = `rgb(249, 115, 22, ${barHeight / 100})`;
+                canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                x += barWidth + 1;
+              }
+
+              animationFrameRef.current = requestAnimationFrame(drawVisualizer);
+            };
+            drawVisualizer();
 
             processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
@@ -152,9 +253,20 @@ export default function App() {
           },
           onmessage: async (message: LiveServerMessage) => {
             // Handle audio output
-            const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (base64Audio) {
-              playAudio(base64Audio);
+            const parts = message.serverContent?.modelTurn?.parts;
+            if (parts) {
+              for (const part of parts) {
+                if (part.inlineData?.data) {
+                  playAudio(part.inlineData.data);
+                }
+                if (part.text) {
+                  setChatHistory(prev => [...prev, {
+                    role: 'AI',
+                    text: part.text as string,
+                    id: Date.now() + Math.random()
+                  }]);
+                }
+              }
             }
 
             // Handle interruption
@@ -218,6 +330,10 @@ export default function App() {
     source.connect(gainNode);
     gainNode.connect(audioCtx.destination);
 
+    if (analyserRef.current) {
+      gainNode.connect(analyserRef.current);
+    }
+
     if (nextPlayTimeRef.current < audioCtx.currentTime) {
       nextPlayTimeRef.current = audioCtx.currentTime;
     }
@@ -249,6 +365,21 @@ export default function App() {
     setIsConnecting(false);
     setStatusMessage('Tryk for at starte');
     
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch (e) {}
+      speechRecognitionRef.current = null;
+    }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
     if (processorRef.current) {
       processorRef.current.disconnect();
       processorRef.current = null;
@@ -277,6 +408,40 @@ export default function App() {
       stopSession();
     };
   }, []);
+
+  const exportHistory = () => {
+    if (chatHistory.length === 0) return;
+    const historyText = chatHistory.map(msg => `[${msg.role}]: ${msg.text}`).join('\n\n');
+    const blob = new Blob([historyText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chat_historik_${new Date().toISOString().slice(0,10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        const activeEl = document.activeElement;
+        const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA';
+        if (!isInput) {
+          e.preventDefault(); // Stop page scroll
+          if (isRecording) {
+            stopSession();
+          } else if (!isConnecting) {
+            startSession();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isRecording, isConnecting]);
 
   return (
     <div className="min-h-screen bg-[#0a0502] text-white flex flex-col items-center justify-center relative overflow-hidden font-sans">
@@ -336,11 +501,13 @@ export default function App() {
                 >
                   <Mic className="w-10 h-10 mb-1" />
                 </motion.div>
-                <div className="flex gap-1 items-end h-4">
-                  <motion.div animate={{ height: Math.max(4, volume * 30) }} className="w-1.5 bg-orange-400 rounded-full" />
-                  <motion.div animate={{ height: Math.max(4, volume * 45) }} className="w-1.5 bg-orange-400 rounded-full" />
-                  <motion.div animate={{ height: Math.max(4, volume * 30) }} className="w-1.5 bg-orange-400 rounded-full" />
-                </div>
+                {/* We replace the old simple height bars with the canvas visualizer */}
+                <canvas
+                  ref={canvasRef}
+                  width={80}
+                  height={24}
+                  className="mt-1"
+                />
               </div>
             ) : (
               <MicOff className="w-12 h-12" />
@@ -348,7 +515,7 @@ export default function App() {
           </button>
         </div>
 
-        <div className="h-8 flex items-center justify-center">
+        <div className="h-8 flex items-center justify-center mb-8">
           {error ? (
             <p className="text-red-400 text-sm font-medium bg-red-400/10 px-4 py-2 rounded-full border border-red-400/20">
               {error}
@@ -372,6 +539,44 @@ export default function App() {
           )}
         </div>
 
+        {/* Chat History Subtitles */}
+        {(isRecording || chatHistory.length > 0) && (
+          <div className="w-full max-w-2xl px-4 mt-4 flex flex-col items-center">
+            <div className="w-full h-64 overflow-y-auto flex flex-col gap-3 rounded-xl p-4 hide-scrollbar mask-image-bottom-fade border border-white/5 bg-white/5">
+              {chatHistory.map((msg) => (
+                <motion.div
+                  key={msg.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`flex flex-col ${msg.role === 'Bruger' ? 'items-end' : 'items-start'}`}
+                >
+                  <span className="text-[10px] text-white/30 uppercase tracking-widest mb-1 ml-1">{msg.role}</span>
+                  <div className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm ${
+                    msg.role === 'Bruger'
+                      ? 'bg-orange-500/20 text-orange-100 border border-orange-500/30 rounded-tr-sm'
+                      : 'bg-white/10 text-white/90 border border-white/5 rounded-tl-sm'
+                  }`}>
+                    {msg.text}
+                  </div>
+                </motion.div>
+              ))}
+              {/* Dummy element to auto-scroll to bottom */}
+              <div style={{ float:"left", clear: "both" }}
+                   ref={(el) => { el?.scrollIntoView({ behavior: 'smooth' }) }}>
+              </div>
+            </div>
+
+            {!isRecording && chatHistory.length > 0 && (
+              <button
+                onClick={exportHistory}
+                className="mt-4 px-4 py-2 rounded-full text-xs font-medium bg-white/5 text-white/60 hover:bg-white/10 hover:text-white transition-all border border-white/10"
+              >
+                Eksportér Historik
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Voice Selection */}
         {!isRecording && !isConnecting && (
           <div className="flex flex-col items-center space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -392,20 +597,53 @@ export default function App() {
               </span>
             </div>
 
-            <div className="flex flex-wrap justify-center gap-2 max-w-md px-4">
-              {voices.map((voice) => (
-                <button
-                  key={voice.id}
-                  onClick={() => setSelectedVoice(voice.id)}
-                  className={`px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 ${
-                    selectedVoice === voice.id
-                      ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]'
-                      : 'bg-white/5 text-white/40 hover:bg-white/10'
-                  }`}
-                >
-                  {voice.name}
-                </button>
-              ))}
+            <div className="flex flex-col gap-4 items-center">
+              <span className="text-xs text-white/40 uppercase tracking-widest">Stemme</span>
+              <div className="flex flex-wrap justify-center gap-2 max-w-md px-4">
+                {voices.map((voice) => (
+                  <button
+                    key={voice.id}
+                    onClick={() => setSelectedVoice(voice.id)}
+                    className={`px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 ${
+                      selectedVoice === voice.id
+                        ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]'
+                        : 'bg-white/5 text-white/40 hover:bg-white/10'
+                    }`}
+                  >
+                    {voice.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 items-center w-full">
+              <span className="text-xs text-white/40 uppercase tracking-widest">Persona</span>
+              <div className="flex flex-wrap justify-center gap-2 max-w-md px-4">
+                {personas.map((persona) => (
+                  <button
+                    key={persona.id}
+                    onClick={() => setSelectedPersonaId(persona.id)}
+                    className={`px-4 py-2 rounded-full text-xs font-medium transition-all duration-300 ${
+                      selectedPersonaId === persona.id
+                        ? 'bg-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]'
+                        : 'bg-white/5 text-white/40 hover:bg-white/10'
+                    }`}
+                  >
+                    {persona.name}
+                  </button>
+                ))}
+              </div>
+
+              {selectedPersonaId === 'custom' && (
+                <div className="w-full max-w-md px-4 mt-2 animate-in fade-in slide-in-from-top-2">
+                  <textarea
+                    value={customPersona}
+                    onChange={(e) => setCustomPersona(e.target.value)}
+                    placeholder="Skriv din egen systeminstruktion her..."
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white/80 placeholder:text-white/30 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 resize-none h-24 transition-all"
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "selectedVoice": { "type": "string" },
+        "outputVolume": { "type": "number" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["email", "selectedVoice", "outputVolume", "createdAt", "updatedAt"]
+    },
+    "Meeting": {
+      "title": "Meeting",
+      "description": "Meeting transcription and summaries",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "transcript": { "type": "string" },
+        "summary": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["userId", "transcript", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user settings for the Gemini Voice App"
+    },
+    "users/{userId}/meetings/{meetingId}": {
+      "schema": { "$ref": "#/entities/Meeting" },
+      "description": "User's meeting transcripts"
+    }
+  }
+}

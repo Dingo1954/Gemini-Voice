@@ -1,0 +1,16 @@
+{
+  "name": "Gemini Voice Companion",
+  "short_name": "Gemini Voice",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0502",
+  "theme_color": "#0a0502",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

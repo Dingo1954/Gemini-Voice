@@ -1,0 +1,79 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null && request.auth.uid != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isOwner(userId) { return isVerified() && request.auth.uid == userId; }
+
+    // Phase 4: Validation Blueprints
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'selectedVoice', 'outputVolume', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 5 &&
+             data.email is string && data.email.size() <= 150 &&
+             data.selectedVoice is string && data.selectedVoice.size() <= 50 &&
+             data.outputVolume is number && data.outputVolume >= 0 && data.outputVolume <= 2 &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidMeeting(data) {
+      return data.keys().hasAll(['userId', 'transcript', 'createdAt']) &&
+             (data.keys().size() == 3 || (data.keys().size() == 4 && 'summary' in data)) &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.transcript is string && data.transcript.size() <= 1048487 && // max 1MB
+             data.createdAt is timestamp &&
+             (!('summary' in data) || (data.summary is string && data.summary.size() <= 1048487));
+    }
+
+    match /users/{userId} {
+      // Prevent ID poisoning
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if isValidId(userId) && isOwner(userId); 
+      
+      allow create: if isValidId(userId) && 
+                       isOwner(userId) && 
+                       isValidUser(incoming()) && 
+                       incoming().createdAt == request.time && 
+                       incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId) && 
+                       isOwner(userId) && 
+                       isValidUser(incoming()) && 
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt == request.time &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['selectedVoice', 'outputVolume', 'updatedAt']);
+                       
+      allow delete: if isValidId(userId) && isOwner(userId);
+
+      match /meetings/{meetingId} {
+        allow get: if isValidId(userId) && isValidId(meetingId) && isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.userId == request.auth.uid;
+        
+        allow create: if isValidId(userId) && isValidId(meetingId) && isOwner(userId) && 
+                         isValidMeeting(incoming()) && 
+                         incoming().userId == request.auth.uid &&
+                         incoming().createdAt == request.time;
+                         
+        allow update: if isValidId(userId) && isValidId(meetingId) && isOwner(userId) && 
+                         isValidMeeting(incoming()) && 
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['summary']);
+                         
+        allow delete: if isValidId(userId) && isValidId(meetingId) && isOwner(userId);
+      }
+    }
+  }
+}

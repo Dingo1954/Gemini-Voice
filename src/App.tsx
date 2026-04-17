@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { Mic, MicOff, Loader2, Volume2 } from 'lucide-react';
+import { Mic, MicOff, Loader2, Volume2, LogIn, LogOut, FileText, MessageCircle, Save, Clock } from 'lucide-react';
 import { motion } from 'motion/react';
+import { auth, db, handleFirestoreError } from './firebase';
+import { doc, getDocFromServer, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, addDoc, query, orderBy, limit } from 'firebase/firestore';
+import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
 
 // Initialize GenAI
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -9,28 +12,130 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 // Support for Safari
 const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
 
+// Browser speech recognition API
+const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [appMode, setAppMode] = useState<'conversation' | 'meeting'>('conversation');
+  
+  const [transcript, setTranscript] = useState('');
+  const [pastMeetings, setPastMeetings] = useState<any[]>([]);
+  const transcriptRef = useRef(''); // Keeps track across recognition restarts
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const isRecordingMeetingRef = useRef(false);
+
   const [isRecording, setIsRecording] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [volume, setVolume] = useState(0);
   const [statusMessage, setStatusMessage] = useState('Tryk for at starte');
-  const [selectedVoice, setSelectedVoice] = useState(() => {
-    return localStorage.getItem('gemini_voice') || 'Zephyr';
-  });
-  const [outputVolume, setOutputVolume] = useState(() => {
-    const saved = localStorage.getItem('gemini_volume');
-    return saved !== null ? parseFloat(saved) : 1;
-  });
-
-  // Persist settings to localStorage
+  const [selectedVoice, setSelectedVoice] = useState('Zephyr');
+  const [outputVolume, setOutputVolume] = useState(1);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Connection Test
   useEffect(() => {
-    localStorage.setItem('gemini_voice', selectedVoice);
-  }, [selectedVoice]);
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error('Please check your Firebase configuration.');
+        }
+      }
+    }
+    testConnection();
+  }, []);
 
+  // Auth Listener
   useEffect(() => {
-    localStorage.setItem('gemini_volume', outputVolume.toString());
-  }, [outputVolume]);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Settings Sync
+  useEffect(() => {
+    if (!user) return;
+    
+    const userRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists() && !isSaving) {
+        const data = docSnap.data();
+        if (data.selectedVoice) setSelectedVoice(data.selectedVoice);
+        if (data.outputVolume !== undefined) setOutputVolume(data.outputVolume);
+      }
+    }, (err) => {
+      handleFirestoreError(err, 'get', `users/${user.uid}`);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load Past Meetings
+  useEffect(() => {
+    if (!user) {
+      setPastMeetings([]);
+      return;
+    }
+    
+    const meetingsRef = collection(db, 'users', user.uid, 'meetings');
+    const q = query(meetingsRef, orderBy('createdAt', 'desc'), limit(5));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const meetingsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setPastMeetings(meetingsData);
+    }, (err) => {
+      handleFirestoreError(err, 'list', `users/${user.uid}/meetings`);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Persist settings to Firestore instead of localStorage
+  useEffect(() => {
+    if (!user || !authReady) return;
+    
+    async function saveSettings() {
+      setIsSaving(true);
+      try {
+        const userRef = doc(db, 'users', user!.uid);
+        const docSnap = await getDocFromServer(userRef);
+        
+        if (!docSnap.exists()) {
+          await setDoc(userRef, {
+            email: user!.email || '',
+            selectedVoice,
+            outputVolume,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+        } else {
+          await updateDoc(userRef, {
+            selectedVoice,
+            outputVolume,
+            updatedAt: serverTimestamp()
+          });
+        }
+      } catch (err) {
+         handleFirestoreError(err, 'update', `users/${user?.uid}`);
+      } finally {
+        setIsSaving(false);
+      }
+    }
+    
+    // Simple debounce
+    const timeout = setTimeout(saveSettings, 1000);
+    return () => clearTimeout(timeout);
+  }, [selectedVoice, outputVolume, user, authReady]);
 
   const voices = [
     { id: 'Zephyr', name: 'Zephyr (Dyb/Rolig)' },
@@ -54,6 +159,89 @@ export default function App() {
       setIsConnecting(true);
       setVolume(0);
       
+      if (appMode === 'meeting') {
+        startMeetingMode();
+      } else {
+        await startConversationMode();
+      }
+    } catch (err: any) {
+      handleSetupError(err);
+    }
+  };
+
+  const startMeetingMode = () => {
+    if (!SpeechRecognition) {
+      setError('Din browser understøtter desværre ikke indbygget diktering. Prøv venligst Chrome eller Edge.');
+      setIsConnecting(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'da-DK';
+
+    let currentFinalTranscript = transcriptRef.current;
+
+    recognition.onstart = () => {
+      setIsConnecting(false);
+      setIsRecording(true);
+      isRecordingMeetingRef.current = true;
+      setStatusMessage('Optager referat...');
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      let incomingFinal = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          incomingFinal += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+
+      if (incomingFinal) {
+        currentFinalTranscript += incomingFinal + ' ';
+        transcriptRef.current = currentFinalTranscript;
+      }
+
+      setTranscript(currentFinalTranscript + interimTranscript);
+      // Simulate volume visually based on speaking intensity
+      setVolume(interimTranscript.length > 0 ? 0.3 + Math.random() * 0.4 : 0);
+      
+      setTimeout(() => {
+        transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+    };
+
+    recognition.onerror = (event: any) => {
+      if (event.error === 'no-speech') return;
+      console.error('Speech recognition error', event.error);
+      if (event.error !== 'aborted') {
+        setError(`Lyd-fejl: ${event.error}`);
+        stopSession();
+      }
+    };
+
+    recognition.onend = () => {
+      if (isRecordingMeetingRef.current) {
+        try { recognition.start(); } catch(e){} // Restart if active
+      } else {
+        setVolume(0);
+      }
+    };
+
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch(e) {
+       console.error("Could not start recognition:", e);
+    }
+  };
+
+  const startConversationMode = async () => {
       setStatusMessage('Starter lydsystem...');
 
       // 1. Setup Audio Context
@@ -84,15 +272,17 @@ export default function App() {
 
       setStatusMessage('Forbinder til AI...');
 
+      let activeSession: any = null;
+
       // 3. Connect to Gemini Live API
       const sessionPromise = ai.live.connect({
         model: 'gemini-3.1-flash-live-preview',
         config: {
           responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoice } },
-          },
           systemInstruction: 'You are a helpful, friendly voice companion. Keep your answers concise and conversational. You are talking to a Danish user, so please speak Danish.',
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoice } }
+          }
         },
         callbacks: {
           onopen: () => {
@@ -115,6 +305,8 @@ export default function App() {
             dummyGain.connect(audioCtx.destination);
 
             processor.onaudioprocess = (e) => {
+              if (!activeSession) return;
+
               const inputData = e.inputBuffer.getChannelData(0);
               
               // Calculate volume for visual feedback
@@ -136,25 +328,33 @@ export default function App() {
                 view.setInt16(i * 2, pcm16[i], true);
               }
               
+              // Fast Base64 conversion chunking to avoid max call stack
               let binary = '';
               const bytes = new Uint8Array(buffer);
-              for (let i = 0; i < bytes.byteLength; i++) {
-                binary += String.fromCharCode(bytes[i]);
+              const chunkSize = 0x8000; 
+              for (let i = 0; i < bytes.length; i += chunkSize) {
+                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
               }
               const base64Data = btoa(binary);
 
-              sessionPromise.then((session) => {
-                session.sendRealtimeInput({
+              try {
+                activeSession.sendRealtimeInput({
                   audio: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
                 });
-              });
+              } catch (sendErr) {
+                console.error("Fejl ved afsendelse af lyd:", sendErr);
+              }
             };
           },
           onmessage: async (message: LiveServerMessage) => {
             // Handle audio output
-            const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (base64Audio) {
-              playAudio(base64Audio);
+            if (message.serverContent?.modelTurn) {
+              const parts = message.serverContent.modelTurn.parts;
+              parts.forEach(p => {
+                if (p.inlineData) {
+                  playAudio(p.inlineData.data);
+                }
+              });
             }
 
             // Handle interruption
@@ -162,10 +362,10 @@ export default function App() {
               stopPlayback();
             }
           },
-          onerror: (err) => {
+          onerror: (err: any) => {
             console.error('Live API Error:', err);
-            setError('Forbindelsesfejl. Prøv igen.');
-            setStatusMessage('Fejl');
+            setError(`Fejl i forbindelse: ${err?.message || 'Ukendt netværksfejl'}`);
+            setStatusMessage('Fejl i forbindelsen');
             stopSession();
           },
           onclose: () => {
@@ -174,21 +374,30 @@ export default function App() {
         }
       });
 
-      sessionRef.current = sessionPromise;
+      sessionPromise.then(session => {
+        activeSession = session;
+      }).catch(err => {
+        console.error('Session connection failed:', err);
+        setError('Kunne ikke oprette forbindelse (Network error).');
+        setIsConnecting(false);
+        stopSession();
+      });
 
-    } catch (err: any) {
+      sessionRef.current = sessionPromise;
+  };
+
+  const handleSetupError = (err: any) => {
       console.error('Failed to start session:', err);
       if (err.name === 'NotAllowedError') {
         setError('Mikrofon adgang nægtet. Tillad venligst mikrofon i din browser.');
       } else if (err.name === 'NotFoundError') {
         setError('Ingen mikrofon fundet. Tjek at dit headset er tilsluttet.');
       } else {
-        setError(err.message || 'Kunne ikke starte mikrofon eller forbinde til AI.');
+        setError(err.message || 'Kunne ikke starte mikrofon.');
       }
       setIsConnecting(false);
       setStatusMessage('Tryk for at starte');
       stopSession();
-    }
   };
 
   const playAudio = (base64Audio: string) => {
@@ -248,6 +457,12 @@ export default function App() {
     setIsRecording(false);
     setIsConnecting(false);
     setStatusMessage('Tryk for at starte');
+    setVolume(0);
+
+    isRecordingMeetingRef.current = false;
+    if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch(e){}
+    }
     
     if (processorRef.current) {
       processorRef.current.disconnect();
@@ -278,19 +493,159 @@ export default function App() {
     };
   }, []);
 
+  const handleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (err) {
+      console.error("Login failed:", err);
+      // Not showing error in UI for brevity if they close popup, handling simple case
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  const saveMeeting = async () => {
+    if (!user || !transcript.trim()) return;
+    try {
+      setIsSaving(true);
+      await addDoc(collection(db, 'users', user.uid, 'meetings'), {
+        userId: user.uid,
+        transcript: transcript.trim(),
+        createdAt: serverTimestamp(),
+      });
+      setTranscript('');
+      transcriptRef.current = '';
+      // Optionally show a momentary success message in a real app
+    } catch(err) {
+      console.error(err);
+      setError("Kunne ikke gemme referat.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#0a0502] text-white flex flex-col items-center justify-center relative overflow-hidden font-sans">
+      
+      {/* Auth Banner */}
+      <div className="absolute top-4 right-4 z-50">
+        {!authReady ? null : user ? (
+          <div className="flex items-center gap-4 bg-white/5 px-4 py-2 rounded-full border border-white/10 backdrop-blur-md">
+            <span className="text-sm text-white/70 max-w-[120px] truncate">{user.email}</span>
+            <button onClick={handleLogout} className="text-orange-400 hover:text-orange-300 transition-colors" title="Log ud">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <button 
+            onClick={handleLogin}
+            className="flex items-center gap-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 px-4 py-2 rounded-full border border-orange-500/20 transition-all font-medium text-sm"
+          >
+            <LogIn className="w-4 h-4" />
+            Log ind med Google
+          </button>
+        )}
+      </div>
+
+      {/* Mode Toggle */}
+      <div className="absolute top-4 left-4 z-50">
+        <div className="flex bg-white/5 rounded-full p-1 border border-white/10 backdrop-blur-md">
+          <button 
+            onClick={() => setAppMode('conversation')}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-medium transition-all ${appMode === 'conversation' ? 'bg-orange-500 text-white shadow-lg' : 'text-white/50 hover:text-white/80'}`}
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span className="hidden sm:inline">Samtale</span>
+          </button>
+          <button 
+            onClick={() => setAppMode('meeting')}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-medium transition-all ${appMode === 'meeting' ? 'bg-orange-500 text-white shadow-lg' : 'text-white/50 hover:text-white/80'}`}
+          >
+            <FileText className="w-4 h-4" />
+            <span className="hidden sm:inline">Møde</span>
+          </button>
+        </div>
+      </div>
+
       {/* Atmospheric Background */}
       <div className="absolute inset-0 z-0 pointer-events-none">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-orange-600/20 rounded-full blur-[120px] opacity-60 mix-blend-screen"></div>
         <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-purple-600/20 rounded-full blur-[100px] opacity-40 mix-blend-screen"></div>
       </div>
 
-      <div className="z-10 flex flex-col items-center space-y-12">
-        <div className="text-center space-y-4">
-          <h1 className="text-5xl font-light tracking-tight text-white/90">Gemini Voice</h1>
-          <p className="text-white/50 text-lg font-light tracking-wide">Your AI Companion</p>
-        </div>
+      <div className={`z-10 flex flex-col items-center flex-1 w-full max-w-4xl px-4 ${appMode === 'meeting' ? 'py-24' : 'justify-center'} space-y-8`}>
+        {appMode === 'conversation' && (
+          <div className="text-center space-y-4">
+            <h1 className="text-5xl font-light tracking-tight text-white/90">Gemini Voice</h1>
+            <p className="text-white/50 text-lg font-light tracking-wide">Your AI Companion</p>
+          </div>
+        )}
+
+        {appMode === 'meeting' && (
+          <div className="w-full flex-1 flex flex-col items-center max-w-2xl mx-auto space-y-4 pt-12 lg:pt-0">
+             <div className="text-center space-y-2 mb-4">
+              <h1 className="text-3xl font-light tracking-tight text-white/90">Mødereferat</h1>
+              <p className="text-white/50 text-sm font-light tracking-wide">Lokal transskribering til skyen.</p>
+            </div>
+            
+            {(transcript || isRecording) ? (
+              <div className="w-full h-80 lg:flex-1 min-h-[300px] bg-white/5 border border-white/10 rounded-2xl p-6 overflow-y-auto backdrop-blur-sm relative">
+                {!transcript && isRecording && (
+                   <div className="absolute inset-0 flex items-center justify-center text-white/30 italic text-sm">
+                     Lytter...
+                   </div>
+                )}
+                <div className="whitespace-pre-wrap text-white/80 leading-relaxed font-light text-lg">
+                  {transcript}
+                  <div ref={transcriptEndRef} />
+                </div>
+              </div>
+            ) : (
+                <div className="w-full max-w-2xl mt-8">
+                  {pastMeetings.length > 0 ? (
+                    <div className="space-y-4">
+                      <h3 className="text-white/40 text-sm tracking-widest uppercase font-medium mb-6">Tidligere referater</h3>
+                      {pastMeetings.map((meeting) => (
+                        <div key={meeting.id} className="bg-white/5 border border-white/10 rounded-xl p-5 hover:bg-white/10 transition-colors">
+                          <div className="flex items-center gap-2 text-white/40 text-xs mb-3">
+                            <Clock className="w-3.5 h-3.5" />
+                            {meeting.createdAt?.toDate ? meeting.createdAt.toDate().toLocaleString('da-DK', { dateStyle: 'medium', timeStyle: 'short'}) : 'Lige nu'}
+                          </div>
+                          <p className="text-white/80 text-sm line-clamp-3 font-light leading-relaxed">
+                            {meeting.transcript}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center p-12 border border-white/5 rounded-2xl bg-white/5">
+                        <FileText className="w-12 h-12 text-white/10 mx-auto mb-4" />
+                        <p className="text-white/40 font-light">Ingen referater endnu.</p>
+                        <p className="text-white/30 text-sm mt-2">Tryk på mikrofonen for at starte et møde.</p>
+                    </div>
+                  )}
+                </div>
+            )}
+
+            {transcript.trim() && !isRecording && user && (
+              <button 
+                onClick={saveMeeting}
+                disabled={isSaving}
+                className="flex items-center gap-2 bg-green-500/20 hover:bg-green-500/30 text-green-400 px-6 py-3 rounded-full border border-green-500/30 transition-all font-medium disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="w-5 h-5 animate-spin"/> : <Save className="w-5 h-5" />}
+                Gem Referat i Skyen
+              </button>
+            )}
+            
+            {!user && transcript.trim() && !isRecording && (
+               <p className="text-xs text-orange-400/80">Log ind oppe til højre for at gemme referatet.</p>
+            )}
+          </div>
+        )}
 
         <div className="relative">
           {/* Pulsing rings when recording */}

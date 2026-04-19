@@ -34,7 +34,10 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState('Tryk for at starte');
   const [selectedVoice, setSelectedVoice] = useState('Zephyr');
   const [outputVolume, setOutputVolume] = useState(1);
+  const [autoSaveTranscript, setAutoSaveTranscript] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Connection Test
   useEffect(() => {
@@ -69,6 +72,7 @@ export default function App() {
         const data = docSnap.data();
         if (data.selectedVoice) setSelectedVoice(data.selectedVoice);
         if (data.outputVolume !== undefined) setOutputVolume(data.outputVolume);
+        if (data.autoSaveTranscript !== undefined) setAutoSaveTranscript(data.autoSaveTranscript);
       }
     }, (err) => {
       handleFirestoreError(err, 'get', `users/${user.uid}`);
@@ -115,6 +119,7 @@ export default function App() {
             email: user!.email || '',
             selectedVoice,
             outputVolume,
+            autoSaveTranscript,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
           });
@@ -122,6 +127,7 @@ export default function App() {
           await updateDoc(userRef, {
             selectedVoice,
             outputVolume,
+            autoSaveTranscript,
             updatedAt: serverTimestamp()
           });
         }
@@ -135,7 +141,7 @@ export default function App() {
     // Simple debounce
     const timeout = setTimeout(saveSettings, 1000);
     return () => clearTimeout(timeout);
-  }, [selectedVoice, outputVolume, user, authReady]);
+  }, [selectedVoice, outputVolume, autoSaveTranscript, user, authReady]);
 
   const voices = [
     { id: 'Zephyr', name: 'Zephyr (Dyb/Rolig)' },
@@ -211,6 +217,16 @@ export default function App() {
       // Simulate volume visually based on speaking intensity
       setVolume(interimTranscript.length > 0 ? 0.3 + Math.random() * 0.4 : 0);
       
+      // Auto-save logic on silence
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
+      silenceTimerRef.current = setTimeout(() => {
+        if (isRecordingMeetingRef.current && autoSaveTranscript) {
+           stopSession(); // This will trigger onend -> auto save
+        }
+      }, 5000); // 5 seconds of silence
+      
       setTimeout(() => {
         transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 50);
@@ -230,10 +246,21 @@ export default function App() {
     };
 
     recognition.onend = () => {
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
       if (isRecordingMeetingRef.current) {
         try { recognition.start(); } catch(e){} // Restart if active
       } else {
         setVolume(0);
+        
+        // Auto-save exactly when meeting mode stops
+        if (autoSaveTranscript && transcriptRef.current.trim()) {
+           // We use a small timeout to let React states settle
+           setTimeout(() => {
+              saveMeeting(transcriptRef.current);
+           }, 100);
+        }
       }
     };
 
@@ -511,13 +538,14 @@ export default function App() {
     await signOut(auth);
   };
 
-  const saveMeeting = async () => {
-    if (!user || !transcript.trim()) return;
+  const saveMeeting = async (transcriptToSave?: string) => {
+    const finalTranscript = transcriptToSave || transcript;
+    if (!user || !finalTranscript.trim()) return;
     try {
       setIsSaving(true);
       await addDoc(collection(db, 'users', user.uid, 'meetings'), {
         userId: user.uid,
-        transcript: transcript.trim(),
+        transcript: finalTranscript.trim(),
         createdAt: serverTimestamp(),
       });
       setTranscript('');
@@ -772,6 +800,24 @@ export default function App() {
                 </button>
               ))}
             </div>
+
+            {/* Application Settings (Meeting Mode focused) */}
+            {appMode === 'meeting' && user && (
+              <label className="flex items-center gap-3 bg-white/5 px-6 py-3 rounded-xl border border-white/10 cursor-pointer hover:bg-white/10 transition-colors mt-4">
+                <div className={`relative w-10 h-5 rounded-full transition-colors ${autoSaveTranscript ? 'bg-orange-500' : 'bg-white/20'}`}>
+                  <div className={`absolute top-0.5 left-0.5 bg-white w-4 h-4 rounded-full transition-transform ${autoSaveTranscript ? 'translate-x-5' : 'translate-x-0'}`} />
+                </div>
+                <input
+                  type="checkbox"
+                  className="hidden"
+                  checked={autoSaveTranscript}
+                  onChange={(e) => setAutoSaveTranscript(e.target.checked)}
+                />
+                <span className="text-sm text-white/70 font-light">
+                  Auto-gem referat ved stop / pause (5s)
+                </span>
+              </label>
+            )}
           </div>
         )}
       </div>

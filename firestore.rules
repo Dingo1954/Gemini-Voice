@@ -20,10 +20,11 @@ service cloud.firestore {
     // Phase 4: Validation Blueprints
     function isValidUser(data) {
       return data.keys().hasAll(['email', 'selectedVoice', 'outputVolume', 'createdAt', 'updatedAt']) &&
-             data.keys().size() == 5 &&
+             (data.keys().size() == 5 || (data.keys().size() == 6 && 'autoSaveTranscript' in data)) &&
              data.email is string && data.email.size() <= 150 &&
              data.selectedVoice is string && data.selectedVoice.size() <= 50 &&
              data.outputVolume is number && data.outputVolume >= 0 && data.outputVolume <= 2 &&
+             (!('autoSaveTranscript' in data) || data.autoSaveTranscript is bool) &&
              data.createdAt is timestamp &&
              data.updatedAt is timestamp;
     }
@@ -53,7 +54,7 @@ service cloud.firestore {
                        isValidUser(incoming()) && 
                        incoming().createdAt == existing().createdAt &&
                        incoming().updatedAt == request.time &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['selectedVoice', 'outputVolume', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['selectedVoice', 'outputVolume', 'autoSaveTranscript', 'updatedAt']);
                        
       allow delete: if isValidId(userId) && isOwner(userId);
 

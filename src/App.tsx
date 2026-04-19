@@ -220,7 +220,11 @@ export default function App() {
       if (event.error === 'no-speech') return;
       console.error('Speech recognition error', event.error);
       if (event.error !== 'aborted') {
-        setError(`Lyd-fejl: ${event.error}`);
+        if (event.error === 'network') {
+          setError('Netværksfejl under diktering. Prøv venligst igen.');
+        } else {
+          setError(`Lyd-fejl: ${event.error}`);
+        }
         stopSession();
       }
     };
@@ -594,8 +598,14 @@ export default function App() {
             {(transcript || isRecording) ? (
               <div className="w-full h-80 lg:flex-1 min-h-[300px] bg-white/5 border border-white/10 rounded-2xl p-6 overflow-y-auto backdrop-blur-sm relative">
                 {!transcript && isRecording && (
-                   <div className="absolute inset-0 flex items-center justify-center text-white/30 italic text-sm">
-                     Lytter...
+                   <div className="absolute inset-0 flex flex-col items-center justify-center text-white/40 italic p-8 text-center space-y-4">
+                     <p className="text-lg">Lytter...</p>
+                     <p className="text-sm font-light opacity-60">
+                       Hvis dine ord ikke dukker op efter et par sekunder, blokerer din browser muligvis for diktering i dette vindue.
+                     </p>
+                     <p className="text-sm font-light opacity-60">
+                       <strong className="text-white">Løsning:</strong> Tryk på knappen <span className="inline-block px-2 py-1 bg-white/10 rounded border border-white/20 mx-1">⍈</span> (Åbn i ny fane) helt oppe i øvre højre hjørne af skærmen, og prøv der!
+                     </p>
                    </div>
                 )}
                 <div className="whitespace-pre-wrap text-white/80 leading-relaxed font-light text-lg">

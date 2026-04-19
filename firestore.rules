@@ -58,8 +58,8 @@ service cloud.firestore {
       allow delete: if isValidId(userId) && isOwner(userId);
 
       match /meetings/{meetingId} {
-        allow get: if isValidId(userId) && isValidId(meetingId) && isOwner(userId) && resource.data.userId == request.auth.uid;
-        allow list: if isValidId(userId) && isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow get: if isValidId(userId) && isValidId(meetingId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId);
         
         allow create: if isValidId(userId) && isValidId(meetingId) && isOwner(userId) && 
                          isValidMeeting(incoming()) && 

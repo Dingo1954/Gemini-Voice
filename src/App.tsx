@@ -351,20 +351,16 @@ export default function App() {
               const pcm16 = new Int16Array(inputData.length);
               for (let i = 0; i < inputData.length; i++) {
                 let s = Math.max(-1, Math.min(1, inputData[i]));
-                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-              }
-              const buffer = new ArrayBuffer(pcm16.length * 2);
-              const view = new DataView(buffer);
-              for (let i = 0; i < pcm16.length; i++) {
-                view.setInt16(i * 2, pcm16[i], true);
+                pcm16[i] = s < 0 ? Math.floor(s * 0x8000) : Math.floor(s * 0x7FFF);
               }
               
               // Fast Base64 conversion chunking to avoid max call stack
+              // Uses subarray to avoid heavy Array.from allocations
               let binary = '';
-              const bytes = new Uint8Array(buffer);
+              const bytes = new Uint8Array(pcm16.buffer);
               const chunkSize = 0x8000; 
               for (let i = 0; i < bytes.length; i += chunkSize) {
-                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
               }
               const base64Data = btoa(binary);
 
@@ -436,14 +432,14 @@ export default function App() {
     if (!audioCtx) return;
 
     const binary = atob(base64Audio);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    const pcm16 = new Int16Array(bytes.buffer);
-    const float32 = new Float32Array(pcm16.length);
-    for (let i = 0; i < pcm16.length; i++) {
-      float32[i] = pcm16[i] / 32768;
+    const length = binary.length;
+    const float32 = new Float32Array(length / 2);
+
+    for (let i = 0; i < float32.length; i++) {
+      let int16 = binary.charCodeAt(i * 2) | (binary.charCodeAt(i * 2 + 1) << 8);
+      // Sign extend 16-bit integer
+      if (int16 & 0x8000) int16 |= 0xFFFF0000;
+      float32[i] = int16 / 32768;
     }
 
     const audioBuffer = audioCtx.createBuffer(1, float32.length, 24000);

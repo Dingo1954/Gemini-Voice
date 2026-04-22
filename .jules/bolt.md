@@ -1,0 +1,3 @@
+## 2025-03-09 - Fast Base64 encoding for Real-time Audio
+**Learning:** In highly frequent real-time critical paths (e.g., `onaudioprocess` handler passing data 10+ times per second), intermediate allocations like `new ArrayBuffer`, `new DataView`, and using `Array.from` for typed array conversion are significant garbage collection bottlenecks. In Node.js / browser, `String.fromCharCode.apply` supports passing `Uint8Array` directly without needing an intermediary standard array.
+**Action:** When converting audio to Base64 (float32 -> int16 -> base64), operate strictly on the underlying `pcm16.buffer`. Cast the sliced `Uint8Array` as `unknown as number[]` to bypass TypeScript's type constraints against sending TypedArrays to `Function.prototype.apply`.

@@ -353,18 +353,15 @@ export default function App() {
                 let s = Math.max(-1, Math.min(1, inputData[i]));
                 pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
               }
-              const buffer = new ArrayBuffer(pcm16.length * 2);
-              const view = new DataView(buffer);
-              for (let i = 0; i < pcm16.length; i++) {
-                view.setInt16(i * 2, pcm16[i], true);
-              }
               
-              // Fast Base64 conversion chunking to avoid max call stack
+              // Optimization: Directly use TypedArray buffer and skip Array.from for faster base64 conversion
+              // This avoids intermediate ArrayBuffer allocations, DataView iterations, and array conversions
+              // during real-time critical path. Note: Assumes standard little-endian host system.
               let binary = '';
-              const bytes = new Uint8Array(buffer);
+              const bytes = new Uint8Array(pcm16.buffer);
               const chunkSize = 0x8000; 
               for (let i = 0; i < bytes.length; i += chunkSize) {
-                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
               }
               const base64Data = btoa(binary);
 

@@ -360,11 +360,12 @@ export default function App() {
               }
               
               // Fast Base64 conversion chunking to avoid max call stack
+              // We pass the TypedArray directly to String.fromCharCode.apply to avoid the overhead of Array.from
               let binary = '';
               const bytes = new Uint8Array(buffer);
               const chunkSize = 0x8000; 
               for (let i = 0; i < bytes.length; i += chunkSize) {
-                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
               }
               const base64Data = btoa(binary);
 

@@ -1,0 +1,3 @@
+## 2025-03-05 - Avoid Array.from in String.fromCharCode.apply
+**Learning:** Calling `Array.from` on large `Uint8Array` chunks before passing them to `String.fromCharCode.apply` introduces significant performance overhead and unnecessary heap allocations.
+**Action:** When converting TypedArrays to strings, directly pass the TypedArray to `String.fromCharCode.apply` and cast it as `unknown as number[]` to satisfy TypeScript. This dramatically improves performance in hot paths like real-time audio processing.

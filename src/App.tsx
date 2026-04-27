@@ -363,8 +363,10 @@ export default function App() {
               let binary = '';
               const bytes = new Uint8Array(buffer);
               const chunkSize = 0x8000; 
+              // Optimization: Avoid Array.from which causes massive heap allocations during real-time processing
+              // Passing TypedArrays directly to String.fromCharCode.apply is significantly faster
               for (let i = 0; i < bytes.length; i += chunkSize) {
-                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
               }
               const base64Data = btoa(binary);
 

@@ -1,0 +1,3 @@
+## 2023-10-27 - Fast TypedArray to Base64 Conversion
+**Learning:** In real-time audio processing (hot paths like `onaudioprocess`), passing a `TypedArray` subset through `Array.from()` before passing to `String.fromCharCode.apply` causes significant performance overhead (~4x slower) due to heap allocation and subsequent garbage collection. The typed array can be passed directly as `unknown as number[]` to bypass this issue entirely.
+**Action:** When converting `Uint8Array` to a string in hot loops, pass the `subarray` directly to `apply(null, bytes)` and typecast as `unknown as number[]` instead of wrapping it in `Array.from()`.

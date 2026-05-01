@@ -1,0 +1,3 @@
+## 2024-05-01 - Avoid Array Reallocations in High-Frequency Audio Processing
+**Learning:** In hot loops like `onaudioprocess` (running ~4+ times/second), using `Array.from()` to convert a `TypedArray` to a regular array creates significant garbage collection overhead. Furthermore, managing active objects like `AudioBufferSourceNode` with `Array.prototype.push` and `Array.prototype.filter` causes O(n) reallocations which are unnecessary.
+**Action:** Use `Set` for managing dynamic lists of active objects where we frequently add and delete, to achieve O(1) removals. Directly cast `TypedArray` when interacting with APIs like `String.fromCharCode.apply` (e.g. `bytes.subarray() as unknown as number[]`) to eliminate heap allocations from temporary regular arrays.

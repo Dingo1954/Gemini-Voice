@@ -360,11 +360,12 @@ export default function App() {
               }
               
               // Fast Base64 conversion chunking to avoid max call stack
+              // ⚡ Bolt Optimization: Avoid Array.from() to prevent excessive heap allocations on the hot path
               let binary = '';
               const bytes = new Uint8Array(buffer);
               const chunkSize = 0x8000; 
               for (let i = 0; i < bytes.length; i += chunkSize) {
-                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
               }
               const base64Data = btoa(binary);
 

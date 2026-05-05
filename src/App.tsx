@@ -157,7 +157,8 @@ export default function App() {
   const dummyGainRef = useRef<GainNode | null>(null);
   const sessionRef = useRef<any>(null);
   const nextPlayTimeRef = useRef<number>(0);
-  const sourceNodesRef = useRef<AudioBufferSourceNode[]>([]);
+  // ⚡ Bolt: Use Set for O(1) removals to avoid array re-allocations
+  const sourceNodesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
   const startSession = async () => {
     try {
@@ -464,9 +465,9 @@ export default function App() {
     source.start(nextPlayTimeRef.current);
     nextPlayTimeRef.current += audioBuffer.duration;
     
-    sourceNodesRef.current.push(source);
+    sourceNodesRef.current.add(source);
     source.onended = () => {
-      sourceNodesRef.current = sourceNodesRef.current.filter(s => s !== source);
+      sourceNodesRef.current.delete(source);
     };
   };
 
@@ -478,7 +479,7 @@ export default function App() {
         // Ignore errors if already stopped
       }
     });
-    sourceNodesRef.current = [];
+    sourceNodesRef.current.clear();
     if (audioContextRef.current) {
       nextPlayTimeRef.current = audioContextRef.current.currentTime;
     }

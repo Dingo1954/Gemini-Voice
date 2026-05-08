@@ -1,0 +1,4 @@
+
+## 2023-10-27 - Real-time Audio Array Processing & React Refs
+**Learning:** In highly frequent real-time operations like Web Audio API `onaudioprocess` converting PCM to Base64, using `Array.from` on a TypedArray inside `String.fromCharCode.apply` causes rapid heap allocations, leading to garbage collection pauses that can cause audio stutter. Additionally, managing many short-lived `AudioBufferSourceNode`s using an Array in a React `useRef` causes unnecessary re-allocations during `filter` operations on `onended` events.
+**Action:** When converting large TypedArrays (like audio buffers) to strings in real-time, cast the TypedArray to `number[]` (`as unknown as number[]`) to satisfy TypeScript while bypassing the `Array.from` heap allocation. For dynamic collections of active resources (like Audio Nodes) in React refs, always use a `Set` instead of an `Array` to achieve O(1) removals and avoid array reallocation overhead.

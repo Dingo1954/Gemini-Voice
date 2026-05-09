@@ -1,0 +1,3 @@
+## 2024-05-24 - [Avoid Array.from for TypedArray base64 conversion in high frequency loops]
+**Learning:** Using `Array.from` on TypedArrays inside high-frequency real-time loops (like processing audio chunks via `onaudioprocess` or modern audio worklets) creates significant heap allocations per chunk, triggering frequent garbage collection and impacting latency.
+**Action:** Cast the TypedArray segment directly to an array of numbers (`bytes.subarray(i, i + chunkSize) as unknown as number[]`) when passing it to `String.fromCharCode.apply` to eliminate the unnecessary allocation while keeping TypeScript happy.

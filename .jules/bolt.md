@@ -1,0 +1,3 @@
+## 2023-10-27 - Optimize audio processing base64 conversion & memory allocations
+**Learning:** For performance-critical code paths like real-time audio processing (`onaudioprocess`), using `Array.from` on a TypedArray to pass it to `String.fromCharCode.apply` causes significant heap allocations and performance drops.
+**Action:** When converting large binary buffers to Base64 strings, skip `Array.from` by casting the TypedArray directly (e.g., `as unknown as number[]`) to avoid unnecessary array allocations. Also, for dynamic collections of active resources that require frequent additions and removals, a `Set` provides O(1) removal complexity compared to filtering an Array.

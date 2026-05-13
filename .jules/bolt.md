@@ -1,0 +1,3 @@
+## 2024-05-24 - Real-time Audio Processing Garbage Collection
+**Learning:** In highly frequent callbacks like `onaudioprocess`, using `Array.from()` to convert TypedArrays for `String.fromCharCode.apply` creates massive GC pressure (heap allocations) which can lead to audio stuttering. Additionally, using Arrays and `.filter()` to manage active `AudioBufferSourceNode`s causes O(N) removals and array re-allocations on every node completion.
+**Action:** Cast TypedArrays to `unknown as number[]` to bypass `Array.from()` in hot paths, and use `Set` for O(1) `add/delete` operations to manage dynamic resource collections.

@@ -1,0 +1,3 @@
+## 2024-05-15 - Array operations on real-time audio paths
+**Learning:** Using `Array.from` for chunking TypedArrays into strings creates significant garbage collection overhead on high-frequency events like script processor nodes. Using `.filter` for rapidly managing dynamically changing collections of active AudioBufferSourceNodes creates unnecessary O(n) reallocations.
+**Action:** Cast TypedArrays to `unknown as number[]` instead of `Array.from` when passing directly to `String.fromCharCode.apply`. Use a `Set` instead of an `Array` for resource tracking collections that require rapid additions and O(1) removals.

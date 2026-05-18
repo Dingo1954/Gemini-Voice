@@ -364,7 +364,9 @@ export default function App() {
               const bytes = new Uint8Array(buffer);
               const chunkSize = 0x8000; 
               for (let i = 0; i < bytes.length; i += chunkSize) {
-                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+                // ⚡ Bolt Optimization: Cast TypedArray directly to number[] to avoid O(N) heap allocations
+                // from Array.from() during hot audio processing loop, reducing GC pauses.
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
               }
               const base64Data = btoa(binary);
 

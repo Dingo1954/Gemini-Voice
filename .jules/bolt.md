@@ -1,0 +1,3 @@
+## 2024-05-16 - [Real-time Audio Processing] Avoid heap allocation in `String.fromCharCode.apply`
+**Learning:** In performance-critical real-time audio loops (like `onaudioprocess`), passing a `TypedArray` mapped through `Array.from()` to `String.fromCharCode.apply` introduces expensive per-chunk heap allocations, leading to GC pauses. The correct approach to satisfy TypeScript and V8/SpiderMonkey engines without the penalty is casting the typed array `as unknown as number[]` because `apply` will efficiently read from the array-like typed array.
+**Action:** When converting large binary buffers or typed arrays to Base64 in hot paths, avoid `Array.from()` conversions and pass the typed array directly with casting to avoid garbage generation.

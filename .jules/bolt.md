@@ -1,0 +1,3 @@
+## 2024-05-29 - Real-time Audio Processing Memory Bottlenecks
+**Learning:** In hot paths like `onaudioprocess` (running frequently for audio frames), `Array.from()` creates huge heap allocations, causing Garbage Collection stutter during real-time processing. Similarly, array reassignment using `.filter` for high-frequency events (`onended` for audio nodes) creates unnecessary GC pressure.
+**Action:** Use `Set` instead of `Array` for dynamic node collections requiring frequent removals (O(1) vs O(N) + re-allocation). For `String.fromCharCode.apply`, pass `TypedArray` directly using `unknown as number[]` instead of using `Array.from`.

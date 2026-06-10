@@ -1,0 +1,3 @@
+## 2024-06-10 - Audio Processing Hot Path Optimization
+**Learning:** In highly frequent paths like `onaudioprocess` handling audio chunks, converting `Uint8Array` using `Array.from()` for `String.fromCharCode.apply` creates severe garbage collection pressure and delays. Additionally, maintaining an active collection of resources like AudioNodes in an array incurs O(N) penalties during removal due to filtering, rather than O(1) in a `Set`.
+**Action:** Avoid `Array.from` in binary-to-string operations within fast-loop contexts by casting to `unknown as number[]`. Use `Set` for collections that frequently add and remove nodes independently.

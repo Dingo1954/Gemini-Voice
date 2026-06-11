@@ -1,0 +1,3 @@
+## 2024-05-23 - Use Set instead of Array for active audio nodes
+**Learning:** The application uses `AudioBufferSourceNode[]` to track active audio nodes during playback and removes them via `.filter()` inside the `onended` callback. This creates an O(N) removal operation and unnecessary array allocations, which is undesirable for real-time audio processing where events are frequent.
+**Action:** When managing dynamic collections of active resources (like `AudioBufferSourceNode`s) that require frequent additions and removals, use a `Set` instead of an `Array` to achieve O(1) removal complexity (`.delete()`) and avoid unnecessary memory allocations.

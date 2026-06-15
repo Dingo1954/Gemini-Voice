@@ -1,0 +1,3 @@
+## 2024-05-18 - Audio Node Memory Leak via Array.filter
+**Learning:** In real-time audio playback, managing dynamically created elements (like AudioBufferSourceNode) with arrays can cause memory and performance issues. Using `Array.filter` inside the `onended` callback repeatedly re-allocates a new array each time a short audio chunk finishes. For high-frequency events, this introduces constant garbage collection pauses which interrupt the main thread.
+**Action:** When tracking highly dynamic sets of short-lived objects that require frequent addition and individual removal upon completion, use a `Set`. It achieves O(1) removal via `delete` and O(1) additions, completely avoiding O(N) reallocation and traversal.

@@ -1,0 +1,3 @@
+## 2024-06-26 - [Avoid TypedArray to Array conversion in Audio loop]
+**Learning:** Using `Array.from()` to convert a TypedArray (like `Uint8Array`) to a regular array within a high-frequency real-time loop (like audio processing) causes massive heap allocations and triggers expensive Garbage Collection pauses.
+**Action:** When passing a TypedArray to `String.fromCharCode.apply`, cast it directly using `(typedArray as unknown as number[])` to satisfy TypeScript without runtime overhead. Furthermore, use a `Set` for managing dynamic collections of active resources (like AudioBufferSourceNodes) that require frequent additions and removals to achieve O(1) removal complexity.

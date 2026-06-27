@@ -364,7 +364,8 @@ export default function App() {
               const bytes = new Uint8Array(buffer);
               const chunkSize = 0x8000; 
               for (let i = 0; i < bytes.length; i += chunkSize) {
-                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+                // ⚡ Bolt: Removed Array.from to prevent unnecessary array heap allocations in this high-frequency loop
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
               }
               const base64Data = btoa(binary);
 

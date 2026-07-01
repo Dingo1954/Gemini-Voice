@@ -1,0 +1,3 @@
+## 2024-05-24 - Set over Array for AudioNodes
+**Learning:** In real-time audio applications, dynamically adding and removing nodes (like `AudioBufferSourceNode`) from an array using `.filter()` causes O(n) time complexity and unnecessary array re-allocations on every audio chunk end.
+**Action:** Use a `Set` instead of an `Array` for managing dynamic collections of active resources that require frequent additions and removals to achieve O(1) removal complexity.

@@ -1,0 +1,3 @@
+## 2026-07-04 - Avoid Array.from in Real-time Audio Processing
+**Learning:** Using `Array.from` to convert `Uint8Array` chunks before passing them to `String.fromCharCode.apply` in the `onaudioprocess` event handler causes unnecessary heap allocations. This runs multiple times per second, which can trigger garbage collection pauses and audio stuttering. `String.fromCharCode.apply` natively supports TypedArrays.
+**Action:** Pass TypedArrays directly to `String.fromCharCode.apply` and cast as `unknown as number[]` to satisfy TypeScript, completely avoiding the `Array.from` heap allocation penalty.
